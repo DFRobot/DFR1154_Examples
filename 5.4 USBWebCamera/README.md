@@ -1,3 +1,5 @@
+- [中文](https://github.com/DFRobot/DFR1154_Examples/blob/master/5.4%20USBWebCamera/README_CN.md)
+
 **Steps** 
 
 - Flash the BIN file to the module and connect the module to the computer via USB. 
