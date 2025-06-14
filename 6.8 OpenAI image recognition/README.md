@@ -1,3 +1,5 @@
+- [中文](https://github.com/DFRobot/DFR1154_Examples/blob/master/6.8%20OpenAI%20image%20recognition/README_CN.md)
+
 This example demonstrates the connection between the DFRobot ESP32-S3 AI CAM and OpenAI for voice and image recognition. After flashing the code, press and hold the BOOT button while asking the module questions such as "What do you see?", "What plant is this?", or "What is he doing?" The module will send audio and image data to OpenAI for recognition and play the results aloud.
 
 **Notes**
