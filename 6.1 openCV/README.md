@@ -1,3 +1,5 @@
+- [中文](https://github.com/DFRobot/DFR1154_Examples/blob/master/6.1%20openCV/README_CN.md)
+
 This example mainly demonstrates the implementation of object contour recognition using OpenCV on the computer side.
 
 **Steps**
