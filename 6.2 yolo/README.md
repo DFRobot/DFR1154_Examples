@@ -1,3 +1,5 @@
+- [中文](https://github.com/DFRobot/DFR1154_Examples/blob/master/6.2%20yolo/README_CN.md)
+
 This example mainly demonstrates the implementation of object classification using YOLOv5 on the computer side. 
 
 ### Steps
