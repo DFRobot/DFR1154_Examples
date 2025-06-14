@@ -1,3 +1,5 @@
+- [English Version](https://github.com/DFRobot/DFR1154_Examples/blob/master/6.6%20xiaozhi/README.md)
+
 通过“flash_download_tool”烧录固件，即可实现接入小智AI大模型。使用前建议阅读配网教程。
 
 **xiaozhi固件**
