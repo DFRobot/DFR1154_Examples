@@ -1,3 +1,5 @@
+- [English Version](https://github.com/DFRobot/DFR1154_Examples/blob/master/5.4%20USBWebCamera/README.md)
+
 **步骤**
 
 - 给模块烧录bin文件，将模块通过USB连接电脑。
