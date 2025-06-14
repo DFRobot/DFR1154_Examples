@@ -65,26 +65,21 @@ void initWiFi() {
     Serial.println("No WiFi credentials found. Please enter:");
   }
 
-  // 清除串口缓存
   while (Serial.available()) Serial.read();
 
-  // 输入SSID
   Serial.println("Enter SSID: ");
   while (Serial.available() == 0) delay(10);
   String inputSSID = Serial.readStringUntil('\n');
   inputSSID.trim();
 
-  // 输入密码
   Serial.println("Enter Password: ");
   while (Serial.available() == 0) delay(10);
   String inputPASS = Serial.readStringUntil('\n');
   inputPASS.trim();
 
-  // 尝试连接
   connectToWiFi(inputSSID.c_str(), inputPASS.c_str());
 
   if (WiFi.status() == WL_CONNECTED) {
-    // 保存到NVS
     preferences.putString("ssid", inputSSID);
     preferences.putString("password", inputPASS);
     Serial.println("WiFi credentials saved.");
