@@ -1,5 +1,6 @@
-该示例代码使用了在edgeimpulse训练的Person_Detection_inferencing模型进行人形识别，通过串口可查看识别结果，通过网页视频流可查看摄像头画面。
+- [English Version](https://github.com/DFRobot/DFR1154_Examples/blob/master/6.3%20edgeimpulse/README.md)
 
+该示例代码使用了在edgeimpulse训练的Person_Detection_inferencing模型进行人形识别，通过串口可查看识别结果，通过网页视频流可查看摄像头画面。
 
 
 **步骤**
