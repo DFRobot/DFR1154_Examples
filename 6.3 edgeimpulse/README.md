@@ -1,6 +1,6 @@
+[中文](https://github.com/DFRobot/DFR1154_Examples/blob/master/6.3%20edgeimpulse/README_CN.md)
+
 The sample code uses the Person_Detection_inferencing model trained on Edge Impulse for human form recognition. The recognition results can be viewed through the serial port, and the camera feed can be viewed via the web video stream. 
-
-
 
 ### Steps
 
