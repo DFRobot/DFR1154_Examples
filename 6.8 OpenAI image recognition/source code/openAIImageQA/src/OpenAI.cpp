@@ -501,63 +501,168 @@ String OpenAI::upload(String endpoint, String boundary, uint8_t * data, size_t l
 
 int OpenAI::audio_post(const String& endpoint, const String& jsonBody) {
   log_d("\"%s\": %s", endpoint.c_str(), jsonBody.c_str());
+  
+  // I2S Setup
   I2SClass i2s;
   i2s.setPins(45, 46, 42);
   if (!i2s.begin(I2S_MODE_STD, 24000, I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO)) {
     log_e("MAX98357 initialization failed!");
+    return -1;
   }
+  
+  // HTTP Setup
   HTTPClient http;
   http.setTimeout(60000);
   http.useHTTP10(true);
   http.begin("https://api.openai.com/v1/" + endpoint);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("Authorization", "Bearer " + api_key);
-
+  
   int httpCode = http.POST(jsonBody);
-  int totalBytesRead = -1; // 记录总共读取的字节数
-
+  int totalBytesRead = 0;
+  
   if (httpCode != HTTP_CODE_OK) {
       log_e("HTTP_ERROR: %d", httpCode);
-  } else {
-      WiFiClient* stream = http.getStreamPtr();
-      uint8_t buffer[1024]; // 缓冲区大小
-      int tempTime = 0;
-      while (http.connected()) {
-          size_t tempSize = stream->available();
-          static int i=0;
-          if (tempSize) {
-              tempTime = 0; // 重置超时计时器
-              size_t bytesToRead = std::min(tempSize, sizeof(buffer)); // 每次最多读取缓冲区大小
-              size_t bytesRead = stream->read(buffer, bytesToRead);
-              if(bytesRead>0){
-                if(i==0){
-                  i++;
-                  pcm_wav_header_t *header = (pcm_wav_header_t *)buffer;
+      http.end();
+      return -1;
+  }
+  
+  WiFiClient* stream = http.getStreamPtr();
+  
+  // ========== BUFFERS (PSRAM!) ==========
+  const size_t RING_SIZE = 32768;  // 32KB = 683ms bei 24kHz 16-bit
+  uint8_t* ring = (uint8_t*)ps_malloc(RING_SIZE);
+  if (!ring) {
+      log_e("Ring allocation failed! Free PSRAM: %d", ESP.getFreePsram());
+      http.end();
+      return -1;
+  }
+  log_d("Ring buffer allocated: 32KB in PSRAM");
+  
+  size_t ringWrite = 0;
+  size_t ringRead = 0;
+  size_t ringUsed = 0;
+  
+  // Network buffer (auch PSRAM für Sicherheit)
+  const size_t NET_BUFFER_SIZE = 2048;
+  uint8_t* netBuffer = (uint8_t*)ps_malloc(NET_BUFFER_SIZE);
+  if (!netBuffer) {
+      log_e("Network buffer allocation failed!");
+      free(ring);
+      http.end();
+      return -1;
+  }
+  
+  bool headerParsed = false;
+  bool playbackActive = false;
+  int timeoutCounter = 0;
+  
+  // Playback Thresholds (angepasst für 32KB)
+  const size_t START_THRESHOLD = 16384;   // 16KB = 341ms zum Start
+  const size_t RESUME_THRESHOLD = 12288;  // 12KB = 256ms zum Resume
+  const size_t PAUSE_THRESHOLD = 4096;    // 4KB = 85ms Minimum
+  
+  log_d("Starting audio stream (ring: %dKB)...", RING_SIZE/1024);
+  
+  while (http.connected() || ringUsed > 0) {
+      size_t available = stream->available();
+      
+      // ===== PHASE 1: NETZWERK → RING =====
+      if (available > 0 && ringUsed < (RING_SIZE - NET_BUFFER_SIZE)) {
+          timeoutCounter = 0;
+          
+          size_t bytesToRead = (available < NET_BUFFER_SIZE) ? available : NET_BUFFER_SIZE;
+          size_t bytesRead = stream->read(netBuffer, bytesToRead);
+          
+          if (bytesRead > 0) {
+              totalBytesRead += bytesRead;
+              
+              // WAV-Header beim ersten Chunk
+              if (!headerParsed) {
+                  pcm_wav_header_t *header = (pcm_wav_header_t *)netBuffer;
                   if (header->fmt_chunk.audio_format != 1) {
-                    log_e("Audio format is not PCM!");
-                    http.end();
-                    return -1;
+                      log_e("Audio format is not PCM!");
+                      free(ring);
+                      free(netBuffer);
+                      http.end();
+                      return -1;
                   }
-                  i2s.configureTX(header->fmt_chunk.sample_rate, (i2s_data_bit_width_t)header->fmt_chunk.bits_per_sample, (i2s_slot_mode_t)header->fmt_chunk.num_of_channels);
-                  i2s.write(buffer+44, bytesRead-44);
-                }else{
-                  i2s.write(buffer,bytesRead);
-                }
+                  i2s.configureTX(
+                      header->fmt_chunk.sample_rate,
+                      (i2s_data_bit_width_t)header->fmt_chunk.bits_per_sample,
+                      (i2s_slot_mode_t)header->fmt_chunk.num_of_channels
+                  );
+                  log_d("I2S: %dHz, %dbit, %dch", 
+                        header->fmt_chunk.sample_rate,
+                        header->fmt_chunk.bits_per_sample,
+                        header->fmt_chunk.num_of_channels);
+                  bytesRead -= 44;
+                  memmove(netBuffer, netBuffer + 44, bytesRead);
+                  headerParsed = true;
               }
-              totalBytesRead += bytesRead; // 更新已读取的字节数
-          } else {
-              tempTime++;
-              if (tempTime > 2500) { // 超时处理 
-                  break;
+              
+              // In Ring schreiben
+              for (size_t i = 0; i < bytesRead && ringUsed < RING_SIZE; i++) {
+                  ring[ringWrite] = netBuffer[i];
+                  ringWrite = (ringWrite + 1) % RING_SIZE;
+                  ringUsed++;
               }
           }
-          delay(1);
+      } else if (available == 0) {
+          timeoutCounter++;
+          if (timeoutCounter > 2500 && !http.connected()) {
+              break;
+          }
       }
+      
+      // ===== PHASE 2: PLAYBACK CONTROL =====
+      if (!playbackActive) {
+          // Starten/Fortsetzen bei genug Daten
+          size_t threshold = http.connected() ? START_THRESHOLD : RESUME_THRESHOLD;
+          if (ringUsed >= threshold || (ringUsed > 0 && !http.connected())) {
+              playbackActive = true;
+              log_d("Playback started (%d bytes)", ringUsed);
+          }
+      } else {
+          // Pausieren bei zu wenig Daten (nur wenn Stream noch aktiv)
+          if (ringUsed < PAUSE_THRESHOLD && http.connected()) {
+              playbackActive = false;
+              log_d("Rebuffering (%d bytes)...", ringUsed);
+          }
+      }
+      
+      // ===== PHASE 3: AUDIO AUSGABE =====
+      if (playbackActive && ringUsed > 0) {
+          // I2S Buffer auf Stack (klein genug!)
+          uint8_t i2sBuffer[1024];
+          size_t chunkSize = (ringUsed < 1024) ? ringUsed : 1024;
+          
+          for (size_t i = 0; i < chunkSize; i++) {
+              i2sBuffer[i] = ring[ringRead];
+              ringRead = (ringRead + 1) % RING_SIZE;
+          }
+          
+          size_t written = i2s.write(i2sBuffer, chunkSize);
+          ringUsed -= written;
+      }
+      
+      // Fertig wenn Stream beendet und Ring leer
+      if (!http.connected() && ringUsed == 0) {
+          break;
+      }
+      
+      delay(1);
   }
-
+  
+  // Cleanup
+  free(ring);
+  free(netBuffer);
   http.end();
-  return totalBytesRead; // 返回实际读取的字节数
+  
+  log_d("Audio finished: %d bytes total", totalBytesRead);
+  return totalBytesRead;
 }
+
 String OpenAI::post(String endpoint, String jsonBody) {
   log_d("\"%s\": %s", endpoint.c_str(), jsonBody.c_str());
   HTTPClient http;
@@ -660,6 +765,10 @@ OpenAI_AudioTranscription OpenAI::audioTranscription(){
 
 OpenAI_AudioTranslation OpenAI::audioTranslation(){
   return OpenAI_AudioTranslation(*this);
+}
+
+OpenAI_TTS OpenAI::tts(){
+  return OpenAI_TTS(*this);
 }
 
 // embeddings { //Creates an embedding vector representing the input text.
@@ -1239,7 +1348,7 @@ static cJSON * createChatMessageWithImageInput (cJSON * messages, const char * r
 }
 
 OpenAI_StringResponse OpenAI_ChatCompletion::message(String p,bool save){
-  message(p, NULL, 0, save);
+  return message(p, NULL, 0, save);
 }
 
 OpenAI_StringResponse OpenAI_ChatCompletion::message(String p,const uint8_t * imageData, long unsigned int imageLength, bool save){
@@ -1354,21 +1463,23 @@ static cJSON * createTTSInput (cJSON * messages,const char * input_text, const c
 }
 int OpenAI_TTS::message(String p){
   String endpoint = "audio/speech";
-  OpenAI_StringResponse(NULL);
-  // 初始化 cJSON 构造请求体
+  
   cJSON *message = cJSON_CreateObject();
   if (!message) { 
-    log_e("cJSON Create failed\n");
+    log_e("cJSON Create failed");
     return 0;
   }
-  message=createTTSInput(message,p.c_str(),"wav");
+  
+  cJSON_AddStringToObject(message, "model", "tts-1");
+  cJSON_AddStringToObject(message, "voice", "alloy");
+  cJSON_AddStringToObject(message, "input", p.c_str());
+  cJSON_AddStringToObject(message, "response_format", "wav");
 
   String jsonBody = String(cJSON_Print(message));
   cJSON_Delete(message);
 
   return oai.audio_post(endpoint, jsonBody);
 }
-
 // edits { //Creates a new edit for the provided input, instruction, and parameters.
 //   "model": "text-davinci-edit-001",//required
 //   "input": "",//string. The input text to use as a starting point for the edit.
@@ -1549,6 +1660,7 @@ OpenAI_ImageResponse OpenAI_ImageGeneration::prompt(String p){
     free(jsonBuffer);
   } else {
     Serial.println("Error in cJSON_Print");
+    return result;
   }
 }
 
