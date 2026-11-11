@@ -11,6 +11,7 @@ class OpenAI_ImageVariation;
 class OpenAI_ImageEdit;
 class OpenAI_AudioTranscription;
 class OpenAI_AudioTranslation;
+class OpenAI_TTS;  
 
 typedef enum {
   OPENAI_IMAGE_SIZE_1024x1024,
@@ -171,6 +172,7 @@ class OpenAI {
     OpenAI_ImageEdit imageEdit();
     OpenAI_AudioTranscription audioTranscription();
     OpenAI_AudioTranslation audioTranslation();
+    OpenAI_TTS tts();
 
     String get(String endpoint);
     String del(String endpoint);
@@ -388,8 +390,7 @@ class OpenAI_AudioTranslation {
 class OpenAI_TTS {
   private:
     OpenAI & oai;
-  protected:
-
+    
   public:
     OpenAI_TTS(OpenAI &openai);
     ~OpenAI_TTS(){};

@@ -30,6 +30,9 @@ size_t wavBufferSize = 0;
 
 void setup(){
   Serial.begin(115200);
+  Serial.print("imageAnswering\n");
+  Serial.printf("PSRAM Size: %d bytes\n", ESP.getPsramSize());
+  Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   audioInit();
